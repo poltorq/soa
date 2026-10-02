@@ -1,0 +1,49 @@
+@startuml
+!include <C4/C4_Container>
+
+LAYOUT_LEFT_RIGHT()
+title C4: контейнерная диаграмма маркетплейса
+
+Person(buyer, "Покупатель", "Ищет товары, оформляет и оплачивает заказы")
+Person(seller, "Продавец", "Управляет своими товарами и предложениями")
+
+System_Ext(payment_provider, "Платёжный провайдер", "Проводит платежи и возвраты")
+System_Ext(notification_provider, "Провайдер уведомлений", "Доставляет email и push-уведомления")
+
+System_Boundary(marketplace, "Маркетплейс") {
+    Container(user_service, "User Service", "HTTP API", "Хранит профили покупателей, продавцов и их роли")
+    Container(catalog_service, "Catalog Service", "HTTP API", "Управляет каталогом, ценами, доступностью и персональной выдачей")
+    Container(order_service, "Order Service", "HTTP API", "Оформляет заказы и управляет их жизненным циклом")
+    Container(payment_service, "Payment Service", "HTTP API", "Проводит платежи и возвраты")
+    Container(message_broker, "Брокер сообщений", "Очередь событий", "Доставляет доменные события между сервисами")
+
+    ContainerDb(user_db, "User DB", "База данных", "Пользователи, профили и роли")
+    ContainerDb(catalog_db, "Catalog DB", "База данных", "Товары, категории, цены и просмотры")
+    ContainerDb(order_db, "Order DB", "База данных", "Заказы, позиции и история статусов")
+    ContainerDb(payment_db, "Payment DB", "База данных", "Платежи, попытки оплаты и возвраты")
+}
+
+Rel(buyer, user_service, "Управляет профилем", "HTTPS")
+Rel(buyer, catalog_service, "Смотрит и ищет товары", "HTTPS")
+Rel(buyer, order_service, "Оформляет и отслеживает заказы", "HTTPS")
+Rel(seller, user_service, "Управляет профилем", "HTTPS")
+Rel(seller, catalog_service, "Управляет товарами и ценами", "HTTPS")
+
+Rel(order_service, user_service, "Проверяет пользователя", "HTTPS")
+Rel(order_service, catalog_service, "Получает цену и доступность", "HTTPS")
+Rel(order_service, payment_service, "Создаёт платёж или возврат", "HTTPS")
+Rel(payment_service, payment_provider, "Проводит операцию", "HTTPS")
+Rel(order_service, notification_provider, "Отправляет уведомление", "HTTPS")
+
+Rel(payment_service, message_broker, "Публикует результат платежа", "Событие")
+Rel(message_broker, order_service, "Доставляет результат платежа", "Событие")
+Rel(order_service, message_broker, "Публикует смену статуса заказа", "Событие")
+Rel(catalog_service, message_broker, "Публикует просмотр товара", "Событие")
+
+Rel(user_service, user_db, "Читает и изменяет")
+Rel(catalog_service, catalog_db, "Читает и изменяет")
+Rel(order_service, order_db, "Читает и изменяет")
+Rel(payment_service, payment_db, "Читает и изменяет")
+
+SHOW_LEGEND()
+@enduml
