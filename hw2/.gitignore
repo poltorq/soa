@@ -1,0 +1,5 @@
+/internal/api/generated.gen.go
+/.env
+/coverage.out
+/bin/
+
