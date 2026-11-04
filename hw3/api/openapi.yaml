@@ -1,0 +1,240 @@
+openapi: 3.0.3
+info:
+  title: Flight Booking API
+  version: 1.0.0
+  description: REST API of Booking Service. Flight operations are proxied to Flight Service over gRPC.
+servers:
+  - url: http://localhost:8080
+paths:
+  /health:
+    get:
+      operationId: getHealth
+      responses:
+        '200':
+          description: Booking Service is ready
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, service]
+                properties:
+                  status: {type: string, example: ok}
+                  service: {type: string, example: booking-service}
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /flights:
+    get:
+      operationId: searchFlights
+      parameters:
+        - name: origin
+          in: query
+          required: true
+          schema: {type: string, pattern: '^[A-Z]{3}$'}
+          example: SVO
+        - name: destination
+          in: query
+          required: true
+          schema: {type: string, pattern: '^[A-Z]{3}$'}
+          example: LED
+        - name: date
+          in: query
+          required: false
+          schema: {type: string, format: date}
+          example: '2026-04-01'
+      responses:
+        '200':
+          description: SCHEDULED flights matching the filters
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/Flight'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+        '504': {$ref: '#/components/responses/GatewayTimeout'}
+  /flights/{id}:
+    get:
+      operationId: getFlight
+      parameters:
+        - $ref: '#/components/parameters/EntityId'
+      responses:
+        '200':
+          description: Flight details
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Flight'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+        '504': {$ref: '#/components/responses/GatewayTimeout'}
+  /bookings:
+    post:
+      operationId: createBooking
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/BookingCreate'}
+            example:
+              user_id: 20000000-0000-0000-0000-000000000001
+              flight_id: 10000000-0000-0000-0000-000000000001
+              passenger_name: Anna Petrova
+              passenger_email: anna@example.com
+              seat_count: 2
+      responses:
+        '201':
+          description: Booking confirmed and seats reserved
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Booking'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+        '504': {$ref: '#/components/responses/GatewayTimeout'}
+    get:
+      operationId: listBookings
+      parameters:
+        - name: user_id
+          in: query
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: User bookings
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/Booking'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+  /bookings/{id}:
+    get:
+      operationId: getBooking
+      parameters:
+        - $ref: '#/components/parameters/EntityId'
+      responses:
+        '200':
+          description: Booking details
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Booking'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /bookings/{id}/cancel:
+    post:
+      operationId: cancelBooking
+      parameters:
+        - $ref: '#/components/parameters/EntityId'
+      responses:
+        '200':
+          description: Booking cancelled and seats returned
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Booking'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+        '504': {$ref: '#/components/responses/GatewayTimeout'}
+components:
+  parameters:
+    EntityId:
+      name: id
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+  schemas:
+    FlightStatus:
+      type: string
+      enum: [SCHEDULED, DEPARTED, CANCELLED, COMPLETED]
+    BookingStatus:
+      type: string
+      enum: [CONFIRMED, CANCELLED]
+    Flight:
+      type: object
+      required:
+        - id
+        - flight_number
+        - airline
+        - origin
+        - destination
+        - departure_time
+        - arrival_time
+        - total_seats
+        - available_seats
+        - price_cents
+        - status
+      properties:
+        id: {type: string, format: uuid}
+        flight_number: {type: string, example: SU1234}
+        airline: {type: string, example: Aeroflot}
+        origin: {type: string, example: SVO}
+        destination: {type: string, example: LED}
+        departure_time: {type: string, format: date-time}
+        arrival_time: {type: string, format: date-time}
+        total_seats: {type: integer, minimum: 1}
+        available_seats: {type: integer, minimum: 0}
+        price_cents: {type: integer, format: int64, minimum: 1}
+        status: {$ref: '#/components/schemas/FlightStatus'}
+    BookingCreate:
+      type: object
+      required: [user_id, flight_id, passenger_name, passenger_email, seat_count]
+      properties:
+        user_id: {type: string, format: uuid}
+        flight_id: {type: string, format: uuid}
+        passenger_name: {type: string, minLength: 1, maxLength: 200}
+        passenger_email: {type: string, format: email, maxLength: 320}
+        seat_count: {type: integer, minimum: 1, maximum: 9}
+    Booking:
+      allOf:
+        - $ref: '#/components/schemas/BookingCreate'
+        - type: object
+          required: [id, total_price_cents, status, created_at, updated_at]
+          properties:
+            id: {type: string, format: uuid}
+            total_price_cents: {type: integer, format: int64, minimum: 1}
+            status: {$ref: '#/components/schemas/BookingStatus'}
+            created_at: {type: string, format: date-time}
+            updated_at: {type: string, format: date-time}
+    Error:
+      type: object
+      required: [error_code, message]
+      properties:
+        error_code: {type: string}
+        message: {type: string}
+  responses:
+    BadRequest:
+      description: Request validation failed
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+    NotFound:
+      description: Requested flight or booking was not found
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+    Conflict:
+      description: Seats are unavailable or the current state rejects the operation
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+    ServiceUnavailable:
+      description: A required service is temporarily unavailable
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+    GatewayTimeout:
+      description: Flight Service did not respond before the deadline
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+

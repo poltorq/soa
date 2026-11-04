@@ -1,0 +1,119 @@
+syntax = "proto3";
+
+package flight.v1;
+
+option go_package = "flight-booking-hw3/gen/flight/v1;flightv1";
+
+import "google/protobuf/timestamp.proto";
+
+service FlightService {
+  // Returns SCHEDULED flights. INVALID_ARGUMENT is returned for invalid filters.
+  rpc SearchFlights(SearchFlightsRequest) returns (SearchFlightsResponse);
+
+  // NOT_FOUND is returned when the flight does not exist.
+  rpc GetFlight(GetFlightRequest) returns (GetFlightResponse);
+
+  // Atomically reserves seats. RESOURCE_EXHAUSTED means there are not enough seats.
+  rpc ReserveSeats(ReserveSeatsRequest) returns (ReserveSeatsResponse);
+
+  // Atomically returns seats. NOT_FOUND means the reservation does not exist.
+  rpc ReleaseReservation(ReleaseReservationRequest) returns (ReleaseReservationResponse);
+
+  // Updates a flight and invalidates cached flight and search data.
+  rpc UpdateFlight(UpdateFlightRequest) returns (UpdateFlightResponse);
+}
+
+enum FlightStatus {
+  FLIGHT_STATUS_UNSPECIFIED = 0;
+  FLIGHT_STATUS_SCHEDULED = 1;
+  FLIGHT_STATUS_DEPARTED = 2;
+  FLIGHT_STATUS_CANCELLED = 3;
+  FLIGHT_STATUS_COMPLETED = 4;
+}
+
+enum ReservationStatus {
+  RESERVATION_STATUS_UNSPECIFIED = 0;
+  RESERVATION_STATUS_ACTIVE = 1;
+  RESERVATION_STATUS_RELEASED = 2;
+  RESERVATION_STATUS_EXPIRED = 3;
+}
+
+message Flight {
+  string id = 1;
+  string flight_number = 2;
+  string airline = 3;
+  string origin = 4;
+  string destination = 5;
+  google.protobuf.Timestamp departure_time = 6;
+  google.protobuf.Timestamp arrival_time = 7;
+  int32 total_seats = 8;
+  int32 available_seats = 9;
+  int64 price_cents = 10;
+  FlightStatus status = 11;
+}
+
+message SeatReservation {
+  string id = 1;
+  string flight_id = 2;
+  string booking_id = 3;
+  int32 seat_count = 4;
+  ReservationStatus status = 5;
+  google.protobuf.Timestamp created_at = 6;
+  google.protobuf.Timestamp updated_at = 7;
+}
+
+message SearchFlightsRequest {
+  string origin = 1;
+  string destination = 2;
+  google.protobuf.Timestamp date = 3;
+}
+
+message SearchFlightsResponse {
+  repeated Flight flights = 1;
+}
+
+message GetFlightRequest {
+  string id = 1;
+}
+
+message GetFlightResponse {
+  Flight flight = 1;
+}
+
+message ReserveSeatsRequest {
+  string flight_id = 1;
+  int32 seat_count = 2;
+  string booking_id = 3;
+}
+
+message ReserveSeatsResponse {
+  SeatReservation reservation = 1;
+  int32 available_seats = 2;
+}
+
+message ReleaseReservationRequest {
+  string booking_id = 1;
+}
+
+message ReleaseReservationResponse {
+  SeatReservation reservation = 1;
+  int32 available_seats = 2;
+}
+
+message UpdateFlightRequest {
+  string id = 1;
+  string flight_number = 2;
+  string airline = 3;
+  string origin = 4;
+  string destination = 5;
+  google.protobuf.Timestamp departure_time = 6;
+  google.protobuf.Timestamp arrival_time = 7;
+  int32 total_seats = 8;
+  int64 price_cents = 9;
+  FlightStatus status = 10;
+}
+
+message UpdateFlightResponse {
+  Flight flight = 1;
+}
+
