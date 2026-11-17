@@ -1,0 +1,44 @@
+@startuml
+!include <C4/C4_Container>
+LAYOUT_LEFT_RIGHT()
+
+title Вариант B — Kafka и событийная координация доставки
+
+System_Ext(bank, "Банковские сервисы", "Создают уведомления")
+System_Ext(profile, "Профиль клиента", "Контакты и настройки каналов")
+System_Ext(providers, "Провайдеры", "Push, SMS и Email")
+System_Ext(ops, "Поддержка и SRE", "Контроль доставки")
+
+System_Boundary(np, "Notification Platform") {
+  Container(api, "Notification API", "Go, REST", "Проверяет запрос и возвращает 202 Accepted")
+  ContainerDb(db, "Delivery Ledger", "PostgreSQL", "Состояния, попытки, Inbox и Outbox")
+  Container(relay, "Outbox Relay", "Go", "Публикует команды и результаты")
+  ContainerQueue(kafka, "Потоки доставки", "Apache Kafka", "Команды, результаты, повторы и DLQ")
+  Container(arbiter, "Delivery Arbiter", "Go", "Выбирает и атомарно разрешает следующую попытку")
+  Container(push, "Push Service", "Go", "Доставка Push")
+  Container(sms, "SMS Service", "Go", "Доставка SMS")
+  Container(email, "Email Service", "Go", "Доставка Email")
+  Container(callbacks, "Обработчик статусов", "Go, REST", "Принимает статусы провайдеров")
+  Container(observability, "Мониторинг доставки", "OpenTelemetry, Prometheus, Grafana", "Метрики, трассировки и аудит")
+}
+
+Rel(bank, api, "Создаёт уведомление", "HTTPS")
+Rel(api, db, "В одной транзакции сохраняет notification и outbox", "SQL")
+Rel(relay, db, "Читает outbox", "SQL")
+Rel(relay, kafka, "Публикует команды и результаты", "Kafka protocol")
+Rel(kafka, arbiter, "Передаёт новые уведомления и результаты")
+Rel(arbiter, profile, "Получает контакты и разрешённые каналы", "HTTPS")
+Rel(arbiter, db, "Атомарно резервирует следующую попытку", "SQL")
+Rel(kafka, push, "PushRequested")
+Rel(kafka, sms, "SmsRequested")
+Rel(kafka, email, "EmailRequested")
+Rel(push, providers, "Отправляет Push", "HTTPS")
+Rel(sms, providers, "Отправляет SMS", "HTTPS")
+Rel(email, providers, "Отправляет Email", "HTTPS")
+Rel(providers, callbacks, "Возвращает delivery receipt", "HTTPS")
+Rel(callbacks, db, "Сохраняет результат и outbox", "SQL")
+Rel(arbiter, observability, "Пишет телеметрию")
+Rel(ops, observability, "Смотрит SLO и расследует ошибки", "HTTPS")
+
+SHOW_LEGEND()
+@enduml

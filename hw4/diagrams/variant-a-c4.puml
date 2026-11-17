@@ -1,0 +1,35 @@
+@startuml
+!include <C4/C4_Container>
+LAYOUT_LEFT_RIGHT()
+
+title Вариант A — PostgreSQL как хранилище и очередь заданий
+
+System_Ext(bank, "Банковские сервисы", "Создают уведомления")
+System_Ext(profile, "Профиль клиента", "Контакты и настройки каналов")
+System_Ext(providers, "Провайдеры", "Push, SMS и Email")
+System_Ext(ops, "Поддержка и SRE", "Контроль доставки")
+
+System_Boundary(np, "Notification Platform") {
+  Container(api, "Notification API", "Go, REST", "В одной транзакции создаёт уведомление и задание")
+  ContainerDb(db, "Notification DB + Job Queue", "PostgreSQL", "Уведомления, попытки и delivery_jobs")
+  Container(coordinator, "Delivery Coordinator", "Go", "Забирает задания, возвращает просроченные lease и управляет переключением")
+  Container(workers, "Обработчики каналов", "Go", "Вызывают Push, SMS и Email API")
+  Container(callbacks, "Обработчик статусов", "Go, REST", "Принимает статусы провайдеров")
+  Container(observability, "Мониторинг доставки", "OpenTelemetry, Prometheus, Grafana", "Метрики, трассировки и аудит")
+}
+
+Rel(bank, api, "Создаёт уведомление", "HTTPS")
+Rel(api, db, "INSERT notification + delivery_job", "SQL transaction")
+Rel(coordinator, db, "Забирает пакет через FOR UPDATE SKIP LOCKED", "SQL")
+Rel(coordinator, profile, "Получает контакты и разрешённые каналы", "HTTPS")
+Rel(coordinator, workers, "Запускает попытку доставки")
+Rel(workers, providers, "Отправляет сообщение", "HTTPS")
+Rel(coordinator, db, "Сохраняет результат и следующее задание", "SQL transaction")
+Rel(providers, callbacks, "Возвращает delivery receipt", "HTTPS")
+Rel(callbacks, db, "Обновляет статус попытки", "SQL")
+Rel(api, observability, "Пишет телеметрию")
+Rel(coordinator, observability, "Пишет телеметрию")
+Rel(ops, observability, "Смотрит SLO и расследует ошибки", "HTTPS")
+
+SHOW_LEGEND()
+@enduml
