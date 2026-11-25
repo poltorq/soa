@@ -1,0 +1,9 @@
+.git
+.DS_Store
+bin
+coverage.out
+README.md
+
+__pycache__
+*.pyc
+docs

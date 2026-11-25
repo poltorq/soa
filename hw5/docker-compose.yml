@@ -1,0 +1,298 @@
+x-kafka-environment: &kafka-environment
+  KAFKA_PROCESS_ROLES: broker,controller
+  KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka-1:9093,2@kafka-2:9093,3@kafka-3:9093
+  KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+  KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+  KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+  KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+  KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+  KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+  KAFKA_MIN_INSYNC_REPLICAS: 2
+  KAFKA_UNCLEAN_LEADER_ELECTION_ENABLE: "false"
+  KAFKA_TRANSACTION_STATE_LOG_NUM_PARTITIONS: 3
+  KAFKA_OFFSETS_TOPIC_NUM_PARTITIONS: 3
+  KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+  KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+  KAFKA_NUM_NETWORK_THREADS: 2
+  KAFKA_NUM_IO_THREADS: 2
+  KAFKA_NUM_REPLICA_FETCHERS: 1
+  KAFKA_BACKGROUND_THREADS: 2
+  KAFKA_LOG_DIRS: /var/lib/kafka/data
+  KAFKA_HEAP_OPTS: -Xms96m -Xmx192m
+  CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+
+services:
+  kafka-1:
+    restart: unless-stopped
+    image: apache/kafka:3.9.0
+    environment:
+      <<: *kafka-environment
+      KAFKA_NODE_ID: 1
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-1:9092
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    volumes:
+      - kafka-1-data:/var/lib/kafka/data
+
+  kafka-2:
+    restart: unless-stopped
+    image: apache/kafka:3.9.0
+    environment:
+      <<: *kafka-environment
+      KAFKA_NODE_ID: 2
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-2:9092
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    volumes:
+      - kafka-2-data:/var/lib/kafka/data
+
+  kafka-3:
+    restart: unless-stopped
+    image: apache/kafka:3.9.0
+    environment:
+      <<: *kafka-environment
+      KAFKA_NODE_ID: 3
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-3:9092
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    volumes:
+      - kafka-3-data:/var/lib/kafka/data
+
+  kafka-init:
+    image: apache/kafka:3.9.0
+    depends_on:
+      kafka-1:
+        condition: service_healthy
+      kafka-2:
+        condition: service_healthy
+      kafka-3:
+        condition: service_healthy
+    command: ["sh", "/scripts/kafka-init.sh"]
+    volumes:
+      - ./scripts/kafka-init.sh:/scripts/kafka-init.sh:ro
+
+  schema-registry:
+    restart: unless-stopped
+    image: confluentinc/cp-schema-registry:8.1.0
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: PLAINTEXT://kafka-1:9092,PLAINTEXT://kafka-2:9092,PLAINTEXT://kafka-3:9092
+      SCHEMA_REGISTRY_KAFKASTORE_TOPIC_REPLICATION_FACTOR: 3
+      SCHEMA_REGISTRY_HEAP_OPTS: -Xms64m -Xmx128m
+    ports:
+      - "127.0.0.1:8082:8081"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8081/subjects >/dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  clickhouse:
+    restart: unless-stopped
+    image: clickhouse/clickhouse-server:24.8-alpine
+    environment:
+      CLICKHOUSE_DB: movie_analytics
+      CLICKHOUSE_USER: analytics
+      CLICKHOUSE_PASSWORD: analytics
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    ports:
+      - "127.0.0.1:8123:8123"
+      - "127.0.0.1:9002:9000"
+    healthcheck:
+      test: ["CMD-SHELL", "clickhouse-client --user analytics --password analytics --query 'SELECT 1' >/dev/null"]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+      - ./db/clickhouse/config/memory.xml:/etc/clickhouse-server/config.d/memory.xml:ro
+
+  clickhouse-migrate:
+    image: clickhouse/clickhouse-server:24.8-alpine
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+      schema-registry:
+        condition: service_healthy
+    command:
+      - sh
+      - -c
+      - >-
+        set -eu;
+        for migration in /migrations/V*.sql; do
+          clickhouse-client --host clickhouse --user analytics --password analytics --multiquery < "$$migration";
+        done
+    volumes:
+      - ./db/clickhouse:/migrations:ro
+
+  postgres:
+    restart: unless-stopped
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: analytics
+      POSTGRES_USER: analytics
+      POSTGRES_PASSWORD: analytics
+    ports:
+      - "127.0.0.1:5435:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U analytics -d analytics"]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  postgres-migrate:
+    image: postgres:16-alpine
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: analytics
+    command:
+      - sh
+      - -c
+      - >-
+        set -eu;
+        for migration in /migrations/V*.sql; do
+          psql -h postgres -U analytics -d analytics -v ON_ERROR_STOP=1 -f "$$migration";
+        done
+    volumes:
+      - ./db/postgres:/migrations:ro
+
+  s3:
+    restart: unless-stopped
+    build:
+      context: ./s3
+    command: >-
+      server -ip=s3 -ip.bind=0.0.0.0 -dir=/data -filer -s3
+      -s3.config=/etc/seaweedfs/credentials.json
+      -master.volumeSizeLimitMB=100 -volume.max=4
+    ports:
+      - "127.0.0.1:4566:8333"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:9333/cluster/status && wget -q -O /dev/null http://localhost:8888/"]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+    volumes:
+      - s3-data:/data
+      - ./s3/credentials.json:/etc/seaweedfs/credentials.json:ro
+
+  movie-service:
+    restart: unless-stopped
+    stop_grace_period: 20s
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: movie-service
+    environment:
+      HTTP_ADDR: :8080
+      KAFKA_BROKERS: kafka-1:9092,kafka-2:9092,kafka-3:9092
+      KAFKA_TOPIC: movie-events
+      SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      EVENT_SCHEMA_PATH: /app/schema/movie_event.avsc
+      KAFKA_PUBLISH_ATTEMPTS: 3
+      KAFKA_PUBLISH_BACKOFF: 200ms
+      GENERATOR_ENABLED: "true"
+      GENERATOR_INTERVAL: 10s
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+      schema-registry:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/service", "-healthcheck"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  aggregation-service:
+    restart: unless-stopped
+    stop_grace_period: 20s
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: aggregation-service
+    environment:
+      HTTP_ADDR: :8081
+      CLICKHOUSE_DSN: clickhouse://aggregator:aggregate-local-secret@clickhouse:9000/movie_analytics
+      POSTGRES_URL: postgres://metrics_writer:metrics-local-secret@postgres:5432/analytics?sslmode=disable
+      S3_ENDPOINT: s3:8333
+      S3_ACCESS_KEY: analytics
+      S3_SECRET_KEY: analytics-local-secret
+      S3_BUCKET: movie-analytics
+      AGGREGATION_INTERVAL: 1m
+      EXPORT_INTERVAL: 24h
+      AGGREGATION_WINDOW_DAYS: 9
+      DATABASE_WRITE_ATTEMPTS: 3
+      DATABASE_WRITE_BACKOFF: 500ms
+    ports:
+      - "127.0.0.1:8081:8081"
+    depends_on:
+      clickhouse-migrate:
+        condition: service_completed_successfully
+      postgres-migrate:
+        condition: service_completed_successfully
+      s3:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/service", "-healthcheck"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  grafana:
+    restart: unless-stopped
+    build:
+      context: ./grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: "false"
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      clickhouse-migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:3000/api/health >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+
+volumes:
+  kafka-1-data:
+  kafka-2-data:
+  kafka-3-data:
+  clickhouse-data:
+  postgres-data:
+  s3-data:
+  grafana-data:

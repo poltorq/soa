@@ -1,0 +1,10 @@
+CREATE USER IF NOT EXISTS aggregator IDENTIFIED WITH sha256_password BY 'aggregate-local-secret';
+GRANT SELECT ON movie_analytics.raw_events TO aggregator;
+GRANT SELECT ON movie_analytics.unique_events TO aggregator;
+GRANT SELECT, INSERT ON movie_analytics.daily_metrics_runs TO aggregator;
+GRANT SELECT, INSERT ON movie_analytics.movie_daily_views_runs TO aggregator;
+GRANT SELECT, INSERT ON movie_analytics.retention_cohorts_runs TO aggregator;
+GRANT SELECT, INSERT ON movie_analytics.aggregate_runs TO aggregator;
+GRANT SELECT ON movie_analytics.daily_metrics_current TO aggregator;
+GRANT SELECT ON movie_analytics.movie_daily_views_current TO aggregator;
+GRANT SELECT ON movie_analytics.retention_cohorts_current TO aggregator;
